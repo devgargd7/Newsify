@@ -4,16 +4,12 @@ import botocore
 from boto3.dynamodb.conditions import Key
 import pandas as pd
 import re
+import datetime
 
 app = FastAPI()
 
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
-
 @app.get("/recommendations/{user_id}")
-async def read_item(user_id):
+async def getRecommendations(user_id):
     dynamodb = boto3.resource('dynamodb'
                               )
     recommendation_table = dynamodb.Table('Recommendations')
@@ -34,7 +30,7 @@ async def read_item(user_id):
         return e.response['Error']['Message']
 
 @app.get("/history/{user_id}")
-async def read_item(user_id):
+async def getHistory(user_id):
     dynamodb = boto3.resource('dynamodb'
                               )
     ut_interactions_table = dynamodb.Table('UserItemInteraction')
@@ -45,6 +41,23 @@ async def read_item(user_id):
             df_ut_interactions = pd.DataFrame(response['Items'])
             items_read_by_user = df_ut_interactions.loc[df_ut_interactions['user_id'] == user_id]['item_id'].tolist()
             return filter_columns([news_collection_table.query(KeyConditionExpression=Key('id').eq(news_id))['Items'] for news_id in items_read_by_user])
+    except botocore.exceptions.ClientError as e:
+        print(e.response['Error']['Message'])
+        return e.response['Error']['Message']
+
+@app.get("/actions/{user_id}/{item_id}")
+async def addActions(user_id, item_id):
+    dynamodb = boto3.resource('dynamodb'
+                              )
+    ut_interactions_table = dynamodb.Table('UserItemInteraction')
+    try:
+        ut = {'id' : user_id + "_" + item_id,
+              'item_id' : item_id,
+              'user_id' : user_id,
+              'type' : 'view',
+              'timestamp' : datetime.datetime.now.isoformat()}
+        ut_interactions_table.put_item(Item=ut)
+        
     except botocore.exceptions.ClientError as e:
         print(e.response['Error']['Message'])
         return e.response['Error']['Message']
