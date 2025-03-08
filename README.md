@@ -164,3 +164,9 @@ Service Discovery:
 For early development & POCs: Keep using API Gateway-Based Discovery.
 For production deployments: Use Kubernetes DNS-based Service Discovery.
 For non-Kubernetes environments: Use Consul or Eureka for automated service registration.
+
+
+bin/zookeeper-server-start.sh config/zookeeper.properties
+bin/kafka-server-start.sh config/server.properties
+src/redis-server
+src/redis-cli
