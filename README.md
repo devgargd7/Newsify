@@ -10,7 +10,7 @@ The News Recommendation Pipeline is a comprehensive MLOps-driven system designed
 - Personalized Recommendations: Combines collaborative filtering (ALS) and content-based methods (FAISS) for hybrid recommendations.
 - Model Drift Detection: Monitors recommendation performance and triggers retraining when drift exceeds a threshold.
 - MLOps Integration: Uses Airflow for orchestration, Kubeflow for pipeline management, and a feature store in MongoDB.
-- API Gateway: Exposes RESTful and GraphQL endpoints for recommendations and story retrieval.
+- API Gateway: Exposes RESTful endpoints for recommendations and story retrieval.
 - Bias Detection: Monitors recommendation diversity and sentiment to ensure fairness.
 
 ## Project Architecture

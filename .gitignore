@@ -3,3 +3,11 @@
 /NewsRecommender/.idea/
 /NewsRecommender/bert_model/
 /venv/
+/kafka*
+/redis*
+/als_model/
+faiss_mapping.json
+faiss_index.bin
+services/.DS_Store
+.DS_Store
+/services/__pycache__
