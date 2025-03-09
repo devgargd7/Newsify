@@ -1,0 +1,36 @@
+# recommendation-trainer.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendation-trainer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommendation-trainer
+  template:
+    metadata:
+      labels:
+        app: recommendation-trainer
+    spec:
+      containers:
+      - name: recommendation-trainer
+        image: your-registry/recommendation-trainer:latest
+        env:
+        - name: MONGO_HOST
+          value: "mongo-service"
+        resources:
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendation-service
+spec:
+  selector:
+    app: recommendation-trainer
+  ports:
+  - port: 5001
+    targetPort: 5001
