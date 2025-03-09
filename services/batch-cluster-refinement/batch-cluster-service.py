@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 import faiss
@@ -7,30 +8,25 @@ import hdbscan
 import numpy as np
 import pymongo
 import umap.umap_ as umap
-import yaml
 from bson import ObjectId
 
-# Load configuration
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
+# Load configuration from environment variables
+MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
+MONGO_PORT = int(os.getenv("MONGO_PORT", 27017))
+MONGO_DB = os.getenv("MONGO_DB", "news")
+MONGO_COLLECTION_ARTICLES = os.getenv("MONGO_COLLECTION_ARTICLES", "articles")
+MONGO_COLLECTION_STORIES = os.getenv("MONGO_COLLECTION_STORIES", "stories")
+FAISS_INDEX_FILE = os.getenv("FAISS_INDEX_FILE", "faiss_index.bin")
+FAISS_MAPPING_FILE = os.getenv("FAISS_MAPPING_FILE", "faiss_mapping.json")
 
-MONGO_HOST = config["mongo"]["host"]
-MONGO_PORT = config["mongo"]["port"]
-MONGO_DB = config["mongo"]["db"]
-MONGO_COLLECTION_ARTICLES = config["mongo"]["collections"]["articles"]
-MONGO_COLLECTION_STORIES = config["mongo"]["collections"]["stories"]
-FAISS_INDEX_FILE = config.get("faiss", {}).get("index_file", "faiss_index.bin")
-FAISS_MAPPING_FILE = config.get("faiss", {}).get("mapping_file", "faiss_mapping.json")
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler()])
+logger = logging.getLogger(__name__)
 
 UMAP_N_COMPONENTS = 5
 UMAP_N_NEIGHBORS = 15
 UMAP_MIN_DISTANCE = 0.0
 HDBSCAN_MIN_CLUSTER_SIZE = 5
 HDBSCAN_MIN_SAMPLE = 1
-
-# Logging setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 def fetch_articles(db):
     """Fetch articles from MongoDB with necessary fields."""

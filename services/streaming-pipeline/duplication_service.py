@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 import numpy as np
@@ -12,18 +13,28 @@ from confluent_kafka import Consumer, KafkaError
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
-KAFKA_BROKER = config["kafka"]["broker"]
-NLP_MODEL = config["nlp"]["spacy_model"]
-SIMILARITY_THRESHOLD = config["nlp"]["similarity_threshold"]
-MONGO_COLLECTION_ARTICLES = config["mongo"]["collections"]["articles"]
-MONGO_COLLECTION_STORIES = config["mongo"]["collections"]["stories"]
-MONGO_HOST = config["mongo"]["host"]
-MONGO_PORT = config["mongo"]["port"]
-MONGO_DB = config["mongo"]["db"]
-KAFKA_TOPIC = config["kafka"]["topic"]
-KAFKA_GROUP_ID = config["kafka"]["group_id"]
+# Load configuration from environment variables with defaults
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
+NLP_MODEL = os.getenv("NLP_MODEL", "en_core_web_sm")
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", 0.7))
+MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
+MONGO_PORT = int(os.getenv("MONGO_PORT", 27017))
+MONGO_DB = os.getenv("MONGO_DB", "news")
+MONGO_COLLECTION_ARTICLES = os.getenv("MONGO_COLLECTION_ARTICLES", "articles")
+MONGO_COLLECTION_STORIES = os.getenv("MONGO_COLLECTION_STORIES", "stories")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "articles")
+KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "streaming_pipeline")
+
+# Logging to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# Rest of the code remains unchanged
+# ...
 
 logging.basicConfig(
     level=logging.INFO,

@@ -1,23 +1,33 @@
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
 import pymongo
 import torch
-import yaml
 from transformers import pipeline
 
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
+# Load configuration from environment variables
+MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
+MONGO_PORT = int(os.getenv("MONGO_PORT", 27017))
+MONGO_DB = os.getenv("MONGO_DB", "news")
+MONGO_COLLECTION_STORIES = os.getenv("MONGO_COLLECTION_STORIES", "stories")
+MONGO_COLLECTION_ARTICLES = os.getenv("MONGO_COLLECTION_ARTICLES", "articles")
+MODEL_NAME = os.getenv("SUMMARIZATION_MODEL", "facebook/bart-large-cnn")
+TRAINING_INTERVAL = int(os.getenv("TRAINING_INTERVAL", 3600))
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler()])
 logger = logging.getLogger(__name__)
+
+from torch.quantization import quantize_dynamic
 
 summarizer = pipeline(
     "summarization",
-    model=config["model"]["summarization"]["model_name"],
-    tokenizer=config["model"]["summarization"]["model_name"]
+    model=MODEL_NAME,
+    tokenizer=MODEL_NAME
 )
+summarizer.model = quantize_dynamic(summarizer.model, {torch.nn.Linear}, dtype=torch.qint8)
+
 
 def generate_summary(text):
     with torch.amp.autocast('cpu'):
@@ -26,10 +36,10 @@ def generate_summary(text):
         )[0]["summary_text"]
 
 def summarize_stories():
-    mongo_client = pymongo.MongoClient(config["mongo"]["host"], config["mongo"]["port"])
-    db = mongo_client[config["mongo"]["db"]]
-    stories_collection = db[config["mongo"]["collections"]["stories"]]
-    articles_collection = db[config["mongo"]["collections"]["articles"]]
+    mongo_client = pymongo.MongoClient(MONGO_HOST, MONGO_PORT)
+    db = mongo_client[MONGO_DB]
+    stories_collection = db[MONGO_COLLECTION_STORIES]
+    articles_collection = db[MONGO_COLLECTION_ARTICLES]
     articles_collection.create_index("link")
     stories_to_summarize = stories_collection.find({
         "$or": [
@@ -54,8 +64,8 @@ def main():
         start_time = time.time()
         summarize_stories()
         elapsed = time.time() - start_time
-        if elapsed < config["training"]["interval"]:
-            time.sleep(config["training"]["interval"] - elapsed)
+        if elapsed < TRAINING_INTERVAL:
+            time.sleep(TRAINING_INTERVAL - elapsed)
 
 if __name__ == "__main__":
     main()

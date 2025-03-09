@@ -1,172 +1,225 @@
-News Ingestion Service
-📌 Features
-Fetch news articles from RSS feeds, web scrapers, and APIs.
-Deduplicate articles from different sources (based on embeddings).
-Pre-process raw news articles (cleaning, tokenization, structuring).
-Store raw and structured data in the database.
-📥 Inputs
-RSS Feeds (XML)
-Web Scraper (HTML)
-External APIs (e.g., NewsAPI, GDELT)
-📤 Outputs
-Structured articles in PostgreSQL (or NoSQL if unstructured).
-Raw article text stored in S3 for later summarization.
-Publish event to Kafka for processing by downstream services.
-🛠 Useful Development Considerations
-Rate-limiting & Backoff Strategies to avoid being blocked by APIs.
-Use Scrapy for web scraping to handle different site structures.
-Kafka Integration to enable real-time streaming ingestion.
-2️⃣ Deduplication & Clustering Service
-📌 Features
-Detect duplicate news articles across sources.
-Group similar articles into news stories (clusters).
-Maintain a history of evolving stories over time.
-📥 Inputs
-Raw articles from News Ingestion Service.
-📤 Outputs
-Clustered news stories stored in PostgreSQL (story_id, articles list).
-Embeddings stored in FAISS for similarity search.
-🛠 Useful Development Considerations
-Text Similarity using SBERT/FAISS for clustering.
-Graph-based Approach (Connected Components) for identifying related articles.
-ElasticSearch for Fast Deduplication Lookups.
-3️⃣ News Summarization Service
-📌 Features
-Generate multi-document summaries for a story.
-Continuously update summary as new articles arrive.
-Store both short and long summaries for UI display.
-📥 Inputs
-Clustered news stories from Deduplication Service.
-📤 Outputs
-Summarized news stories stored in PostgreSQL/S3.
-Event published to Kafka for UI updates.
-🛠 Useful Development Considerations
-Use BART/T5/Llama for NLP Summarization.
-ROUGE Score Optimization to maintain quality.
-Avoid Hallucinations by enforcing source constraints.
-4️⃣ Content Categorization & Tagging Service
-📌 Features
-Assign categories (Politics, Tech, Sports, etc.) to articles.
-Extract keywords and entities (NER) from content.
-Tag articles with relevant topics for better recommendations.
-📥 Inputs
-Structured articles from Ingestion Service.
-📤 Outputs
-Category, tags, and metadata stored in PostgreSQL.
-Indexed in ElasticSearch for fast lookups.
-🛠 Useful Development Considerations
-Zero-shot classification models (BART, GPT-3.5 for tagging).
-NER using Spacy or BERT-based models.
-Use TF-IDF or TextRank for keyword extraction.
-5️⃣ User Behavior Tracking Service
-📌 Features
-Track user interactions (clicks, reads, likes, shares, etc.).
-Store user engagement data for personalization.
-Publish behavioral events to Kafka for real-time analytics.
-📥 Inputs
-API requests from frontend (user actions).
-📤 Outputs
-User behavior data stored in PostgreSQL/DynamoDB.
-Streamed to Kafka for training recommendation models.
-🛠 Useful Development Considerations
-Kafka Streams for real-time event processing.
-GDPR Compliance (Data Retention Policies).
-Feature engineering for ML-based recommendations.
-6️⃣ Recommendation Engine
-📌 Features
-Generate personalized news feeds using hybrid recommendations.
-Update recommendations in real-time based on user behavior.
-A/B test different models and ranking strategies.
-📥 Inputs
-User interaction data from Behavior Tracking Service.
-Articles and metadata from Categorization Service.
-📤 Outputs
-Recommended stories stored in Redis for fast serving.
-Recommendations exposed via GraphQL/REST API.
-🛠 Useful Development Considerations
-Hybrid Model (Collaborative + Content-Based Filtering).
-Feature Store (Feast) for efficient recommendation lookups.
-FAISS/KNN for fast nearest-neighbor retrieval.
-7️⃣ API Gateway (GraphQL & REST API)
-📌 Features
-Expose REST & GraphQL endpoints for frontend & third-party apps.
-Handle request routing & load balancing.
-Enforce authentication & authorization (JWT, OAuth).
-📥 Inputs
-API requests from frontend and external consumers.
-📤 Outputs
-JSON responses with news summaries, recommendations, user data.
-🛠 Useful Development Considerations
-Use FastAPI or GraphQL (Apollo Server).
-Rate-limiting & API Caching (Redis, CloudFront).
-OAuth for secure access to user data.
-8️⃣ Bias Detection & Fairness Monitoring
-📌 Features
-Analyze recommendations for source diversity.
-Detect overexposure to specific opinions or topics.
-Introduce counter-balancing recommendations if bias is detected.
-📥 Inputs
-Recommendation logs from Recommendation Engine.
-📤 Outputs
-Bias scores stored in PostgreSQL for monitoring.
-Reports and insights accessible via API.
-🛠 Useful Development Considerations
-Sentiment analysis on recommended articles.
-Use SHAP/LIME for explainable AI in recommendations.
-Diversity Score Calculation (Measuring source/topic spread).
-9️⃣ Performance Monitoring & Analytics
-📌 Features
-Track system performance metrics (latency, API errors, model drift).
-Monitor ML pipeline health (data drift, model accuracy).
-Provide real-time dashboards for analytics.
-📥 Inputs
-Logs & events from all microservices.
-📤 Outputs
-Metrics stored in Prometheus/Grafana for visualization.
-🛠 Useful Development Considerations
-Prometheus for system metrics collection.
-Grafana Dashboards for real-time visualization.
-Alerting & Notifications (PagerDuty, Slack, Email).
+# News Recommendation Pipeline
 
+### Overview
+The News Recommendation Pipeline is a comprehensive MLOps-driven system designed to ingest news articles from RSS feeds, process and cluster them into stories, generate summaries, and provide personalized recommendations to users. Built with scalability and maintainability in mind, it leverages a Kubernetes-based deployment on a single EC2 instance using Minikube, integrating modern tools like Kafka, Redis, MongoDB, Airflow, and Kubeflow to create a robust end-to-end pipeline. The system includes advanced features such as model drift detection, automatic retraining, and bias monitoring, ensuring high-quality recommendations that adapt to changing user behavior and content trends.
 
+## Key Features
+- Real-Time Ingestion: Scrapes articles from RSS feeds and streams them via Kafka.
+- Story Clustering: Groups articles into coherent stories using UMAP and HDBSCAN.
+- Summarization: Generates concise summaries for stories using a lightweight transformer model (DistilBART).
+- Personalized Recommendations: Combines collaborative filtering (ALS) and content-based methods (FAISS) for hybrid recommendations.
+- Model Drift Detection: Monitors recommendation performance and triggers retraining when drift exceeds a threshold.
+- MLOps Integration: Uses Airflow for orchestration, Kubeflow for pipeline management, and a feature store in MongoDB.
+- API Gateway: Exposes RESTful and GraphQL endpoints for recommendations and story retrieval.
+- Bias Detection: Monitors recommendation diversity and sentiment to ensure fairness.
+
+## Project Architecture
+### High-Level Architecture
+
+The pipeline consists of several microservices interacting through Kubernetes DNS-based service discovery, with data flowing through Kafka, Redis, and MongoDB for processing and storage.
+
+```mermaid
+flowchart TD
+  %% Data Ingestion Pipeline
+  subgraph "Data Ingestion Pipeline"
+    A[Ingestion Service<br>scrapes news data]
+    B[Kafka<br>Message Broker]
+    A -->|Publishes scraped news| B
+    C[Duplication Service<br>creates initial story groupings]
+    B -->|Consumes messages| C
+  end
+
+  %% Story Processing Pipeline
+  subgraph "Story Processing Pipeline"
+    D[MongoDB<br>Raw Articles Collection]
+    E[MongoDB<br>Stories Collection]
+    C -->|Writes grouped data| D
+    C -->|Writes grouped data| E
+    F[Batch Cluster Service<br>refines clusters]
+    D & E -->|Reads data| F
+    G[Summarization Service<br>generates summaries]
+    F -->|Outputs refined stories| G
+    G -->|Updates stories| E
+  end
+
+  %% User Interaction & Recommendation
+  subgraph "User Interaction & Recommendation"
+    H[User Behaviour Service<br>tracks user interactions]
+    H -->|Stores interactions| E
+    I[Recommendation Trainer<br>trains recommendation model]
+    E -->|Provides story data| I
+    H -->|Provides user data| I
+  end
+
+  %% API & External Access
+  subgraph "API & Endpoints"
+    J[API Gateway Service<br>exposes endpoints, drift checking]
+    J -->|Exposes endpoints| A
+    J -->|Exposes endpoints| H
+  end
+
+  %% MLops Orchestration & Components
+  subgraph "MLops & Orchestration"
+    K[Airflow<br>Orchestrates batch jobs]
+    K --> A
+    K --> F
+    K --> G
+    K --> I
+    L[Kubeflow<br>ML pipelines, experiment tracking]
+    M[Feast<br>Feature Store]
+    N[MLflow<br>Model Store & Tracking]
+    O[Drift Detection Endpoint<br>computes drift score]
+    J --> O
+  end
+
+  %% Additional Infrastructure
+  subgraph "Infrastructure"
+    P[Redis<br>Cache / Session Store]
+    J --> P
+  end
+
+  %% External Users
+  Q[Users]
+  Q -->|API calls| J
+```
+
+### Component Descriptions
+- **Ingestion Service**: Scrapes news data from various sources and publishes the results to Kafka for downstream processing.
+
+- Kafka (Message Broker): Serves as the communication backbone by asynchronously relaying news data from the Ingestion Service to the Streaming Pipeline.
+
+- Streaming Pipeline (Duplication Service): Processes articles from Kafka, extracts features (embeddings, entities), and clusters them into stories in MongoDB.
+
+- MongoDB: Acts as the primary datastore with separate collections for raw news articles and processed story data.
+
+- Batch Cluster Refinement: Periodically reads grouped data from MongoDB, refines story clusters and updates the FAISS index for content-based recommendations.
+
+- Summarization Service: Generates concise summaries for the refined story clusters using DistilBART and updates the corresponding records in MongoDB.
+
+- User Behaviour Service: Tracks user interactions (such as clicks and views) and stores this behavioral data in MongoDB for further analysis.
+
+- Recommendation Trainer: Periodically trains the recommendation model using both story data and user interaction data an ALS model, computes user embeddings, and precomputes hybrid recommendations, stored in MongoDB, typically orchestrated as a batch job via Airflow.
+
+- API Gateway Service: Exposes HTTP endpoints for both external users and internal services (including model drift checking) and acts as the single entry point for API calls.
+
+- Drift Detection Endpoint: Computes the model drift score, which is used to determine if the recommendation model needs to be retrained.
+
+- Airflow: Orchestrates all batch jobs (ingestion, clustering, summarization, and training) through scheduled DAGs, ensuring smooth workflow execution.
+
+- Kubeflow: Integrates with the ML pipeline for experiment tracking, model deployment, and overall ML workflow management.
+
+- Feast (Feature Store): Centralizes feature management for machine learning, ensuring consistent access to features during both training and serving.
+
+- MLflow (Model Store & Tracking): Provides model versioning, experiment tracking, and storage capabilities to support reproducible ML workflows.
+
+- Redis: Functions as a caching layer, enhancing performance for the API Gateway and other components that require quick data access.
+
+- Users: External clients that interact with the system via the UI, consuming news, summaries, and personalized recommendations.
+
+### Data Flow
+
+```mermaid
 sequenceDiagram
-    participant User
-    participant API Gateway
-    participant Ingestion Service
-    participant Deduplication Service
-    participant Summarization Service
-    participant Categorization Service
-    participant Recommendation Engine
-    participant User Behavior Service
-    participant Bias Detection Service
+    participant RSS as RSS Feeds
+    participant Ingestion as Ingestion Service
+    participant Kafka as Kafka Broker
+    participant Streaming as Streaming Pipeline
+    participant MongoDB as MongoDB
+    participant Clustering as Batch Cluster Refinement
+    participant FAISS as FAISS Index
+    participant Summarization as Summarization Service
+    participant Trainer as Recommendation Trainer
+    participant API as API Service
+    participant User as User
 
-    User->>API Gateway: Request Personalized News Feed
-    API Gateway->>Recommendation Engine: Fetch Recommendations
-    Recommendation Engine->>User Behavior Service: Retrieve User Profile
-    Recommendation Engine->>Categorization Service: Get Article Metadata
-    Recommendation Engine->>Bias Detection Service: Check for Bias
-    Bias Detection Service->>Recommendation Engine: Bias Report
-    Recommendation Engine->>API Gateway: Personalized Articles List
-    API Gateway->>User: Deliver News Feed
+    RSS->>Ingestion: Fetch Articles
+    Ingestion->>Kafka: Publish Articles
+    Kafka->>Streaming: Consume Articles
+    Streaming->>MongoDB: Store Articles/Stories
+    Clustering->>MongoDB: Fetch Articles
+    Clustering->>FAISS: Update Index
+    Summarization->>MongoDB: Fetch Stories
+    Summarization->>MongoDB: Update Summaries
+    Trainer->>MongoDB: Fetch Interactions
+    Trainer->>FAISS: Query Content-Based Recs
+    Trainer->>MongoDB: Store Recommendations
+    User->>API: Request Recommendations
+    API->>MongoDB: Fetch Recommendations
+    API->>User: Return Stories
+```
 
-    Note over Ingestion Service, Deduplication Service, Summarization Service: Background Processes
-
-    Ingestion Service->>Deduplication Service: Send New Articles
-    Deduplication Service->>Summarization Service: Send Unique Articles
-    Summarization Service->>Categorization Service: Provide Summarized Content
-    Categorization Service->>Recommendation Engine: Update Content Metadata
-    User->>API Gateway: Interact with Articles
-    API Gateway->>User Behavior Service: Log User Interaction
-    User Behavior Service->>Recommendation Engine: Update User Profile
-
-
-Service Discovery:
-For early development & POCs: Keep using API Gateway-Based Discovery.
-For production deployments: Use Kubernetes DNS-based Service Discovery.
-For non-Kubernetes environments: Use Consul or Eureka for automated service registration.
+## Setup
+### Prerequisites
+- AWS Account: For EC2 instance provisioning.
+- Terraform: To deploy the EC2 instance.
+- Minikube: For local Kubernetes cluster on EC2.
+- Docker: For containerizing services.
+- Python 3.9+: For running services locally.
+- Dependencies: Listed in requirements.txt.
 
 
-bin/zookeeper-server-start.sh config/zookeeper.properties
-bin/kafka-server-start.sh config/server.properties
-src/redis-server
-src/redis-cli
+### 1. Provision Infrastructure
+Initialize Terraform:
+```bash
+cd terraform
+terraform init
+terraform apply -auto-approve
+```
+
+SSH into EC2:
+```bash
+ssh -i your-key.pem ec2-user@<instance_public_ip>
+```
+### 2. Start Minikube
+```bash
+minikube start --driver=docker --memory=12000 --cpus=4
+minikube addons enable ingress
+minikube addons enable metrics-server
+```
+
+### 3. Deploy Dependencies
+MongoDB:
+```bash
+kubectl apply -f k8s/mongo-deployment.yaml
+```
+
+Kafka:
+```bash
+kubectl apply -f k8s/kafka-deployment.yaml
+```
+
+Redis:
+```bash
+kubectl apply -f k8s/redis-deployment.yaml
+```
+
+PostgreSQL (for bias detection):
+```bash
+kubectl apply -f k8s/postgres-deployment.yaml
+```
+
+### 4. Build and Deploy Services
+For each service:
+
+Build Docker Image:
+```bash
+docker build -t your-registry/<service>:latest -f <service>.Dockerfile .
+docker push your-registry/<service>:latest
+```
+
+Deploy to Kubernetes:
+```bash
+kubectl apply -f k8s/<service>-deployment.yaml
+```
+
+### 5. Configure Orchestration
+Airflow:
+```bash
+helm install airflow apache-airflow/airflow --set executor=KubernetesExecutor
+kubectl cp dags/recommendation_trainer_dag.py airflow-pod:/opt/airflow/dags/
+```
+
+Kubeflow:
+```bash
+curl -s "https://raw.githubusercontent.com/kubeflow/manifests/v1.8.0-rc.1/install.sh" | bash
+```

@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: batch-cluster-refinement
-        image: your-registry/batch-cluster-refinement:latest  # Build and push your image
+        image: your-registry/batch-cluster-service:latest  # Build and push your image
         env:
         - name: MONGO_HOST
           value: "mongo-service"

@@ -233,32 +233,28 @@
 #     return response
 
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pymongo
 import yaml
-from bson import ObjectId
-
-# # -------------------------------
-# # Main Entry Point
-# # -------------------------------
-# if __name__ == "__main__":
-#     import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
-
-MONGO_HOST = config["mongo"]["host"]
-MONGO_PORT = config["mongo"]["port"]
-MONGO_DB = config["mongo"]["db"]
-MONGO_COLLECTION_STORIES = config["mongo"]["collections"]["stories"]
-MONGO_COLLECTION_RECOMMENDATIONS = config["mongo"]["collections"]["recommendations"]
+# Load configuration from environment variables
+MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
+MONGO_PORT = int(os.getenv("MONGO_PORT", 27017))
+MONGO_DB = os.getenv("MONGO_DB", "news")
+MONGO_COLLECTION_STORIES = os.getenv("MONGO_COLLECTION_STORIES", "stories")
+MONGO_COLLECTION_RECOMMENDATIONS = os.getenv("MONGO_COLLECTION_RECOMMENDATIONS", "recommendations")
+MONGO_COLLECTION_USER_INTERACTIONS = os.getenv("MONGO_COLLECTION_USER_INTERACTIONS", "user_interactions")
+DRIFT_THRESHOLD = float(os.getenv("DRIFT_THRESHOLD", 0.2))
 
 mongo_client = pymongo.MongoClient(MONGO_HOST, MONGO_PORT)
 db = mongo_client[MONGO_DB]
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler()])
 logger = logging.getLogger("api_service")
 
 app = FastAPI()
@@ -266,9 +262,25 @@ app = FastAPI()
 class Story(BaseModel):
     id: str = Field(..., alias="_id")
     summary: str
-    # keywords: list = []
     entities: list = []
     articles: list[str]
+
+def compute_interaction_score(interaction):
+    scores = {"like": 1.0, "read": 0.01, "share": 0.5, "click": 0.1, "default": 0.0}
+    return float(scores.get(interaction.get("event_type", "default")))
+
+def compute_drift_score():
+    recent_interactions = list(db[MONGO_COLLECTION_USER_INTERACTIONS].find({
+        "timestamp": {"$gte": datetime.now(timezone.utc) - timedelta(days=7)}
+    }))
+    if not recent_interactions:
+        return 0.0
+    recent_scores = [compute_interaction_score(interaction) for interaction in recent_interactions]
+    historical_scores = [compute_interaction_score(interaction) for interaction in db[MONGO_COLLECTION_USER_INTERACTIONS].find()]
+    recent_mean = np.mean(recent_scores) if recent_scores else 0
+    historical_mean = np.mean(historical_scores) if historical_scores else 0
+    drift_score = abs(recent_mean - historical_mean) / historical_mean if historical_mean != 0 else 0
+    return drift_score
 
 @app.get("/recommendations/{user_id}", response_model=list[Story])
 def get_recommendations(user_id: str):
@@ -321,6 +333,15 @@ def get_story(story_id: str):
     except Exception as e:
         logger.error(f"Error fetching story: {e}")
         raise HTTPException(status_code=500, detail="Error fetching story")
+
+@app.get("/drift_score")
+def get_drift_score():
+    try:
+        drift_score = compute_drift_score()
+        return {"drift_score": drift_score}
+    except Exception as e:
+        logger.error(f"Error computing drift score: {e}")
+        raise HTTPException(status_code=500, detail="Error computing drift score")
 
 if __name__ == "__main__":
     import uvicorn

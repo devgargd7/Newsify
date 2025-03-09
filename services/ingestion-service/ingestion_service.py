@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -9,17 +10,15 @@ import yaml
 from confluent_kafka import Producer
 from newspaper import Article
 
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
-
-KAFKA_BROKER = config["kafka"]["broker"]
-KAFKA_TOPIC = config["kafka"]["topic"]
-REDIS_HOST = config["redis"]["host"]
-REDIS_PORT = config["redis"]["port"]
-REDIS_DB = config["redis"]["db"]
-DEDUPLICATION_EXPIRY = config["redis"]["deduplication_expiry"]
-RSS_FEEDS = config["rss_feeds"]
-INGESTION_INTERVAL = config["ingestion"]["interval"]
+# Load configuration from environment variables
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "articles")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_DB = int(os.getenv("REDIS_DB", 0))
+DEDUPLICATION_EXPIRY = int(os.getenv("DEDUPLICATION_EXPIRY", 86400))
+RSS_FEEDS = json.loads(os.getenv("RSS_FEEDS", '{"source1": "http://example.com/rss"}'))
+INGESTION_INTERVAL = int(os.getenv("INGESTION_INTERVAL", 300))
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

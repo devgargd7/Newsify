@@ -1,42 +1,33 @@
 import json
 import logging
 import math
+import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import faiss
 import numpy as np
 import pymongo
-import yaml
 from pyspark.ml.feature import StringIndexer
 from pyspark.ml.recommendation import ALS
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from pyspark.sql.types import FloatType, StringType, StructField, StructType
 
-# Load configuration from config.yaml
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
+# Load configuration from environment variables
+MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
+MONGO_PORT = int(os.getenv("MONGO_PORT", 27017))
+MONGO_DB = os.getenv("MONGO_DB", "news")
+MONGO_COLLECTION_USER_INTERACTIONS = os.getenv("MONGO_COLLECTION_USER_INTERACTIONS", "user_interactions")
+MONGO_COLLECTION_STORIES = os.getenv("MONGO_COLLECTION_STORIES", "stories")
+MONGO_COLLECTION_RECOMMENDATIONS = os.getenv("MONGO_COLLECTION_RECOMMENDATIONS", "recommendations")
+FAISS_INDEX_FILE = os.getenv("FAISS_INDEX_FILE", "faiss_index.bin")
+FAISS_MAPPING_FILE = os.getenv("FAISS_MAPPING_FILE", "faiss_mapping.json")
+DRIFT_THRESHOLD = float(os.getenv("DRIFT_THRESHOLD", 0.2))
+TRAINING_INTERVAL = int(os.getenv("TRAINING_INTERVAL", 86400))
 
-# Logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("recommendation_trainer.log")]
-)
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler()])
 logger = logging.getLogger(__name__)
-
-# MongoDB configuration
-MONGO_HOST = config["mongo"]["host"]
-MONGO_PORT = config["mongo"]["port"]
-MONGO_DB = config["mongo"]["db"]
-MONGO_COLLECTION_USER_INTERACTIONS = config["mongo"]["collections"]["user_interactions"]
-MONGO_COLLECTION_STORIES = config["mongo"]["collections"]["stories"]
-MONGO_COLLECTION_RECOMMENDATIONS = config["mongo"]["collections"]["recommendations"]
-
-# FAISS index and mapping paths
-FAISS_INDEX_FILE = "faiss_index.bin"
-FAISS_MAPPING_FILE = "faiss_mapping.json"
 
 # ### Helper Functions
 
@@ -51,6 +42,19 @@ def compute_interaction_score(interaction):
     }
     return float(scores.get(interaction.get("event_type", "default")))
 
+def compute_drift_score(db):
+    recent_interactions = list(db[MONGO_COLLECTION_USER_INTERACTIONS].find({
+        "timestamp": {"$gte": datetime.now(timezone.utc) - timedelta(days=7)}
+    }))
+    if not recent_interactions:
+        return 0.0
+    recent_scores = [compute_interaction_score(interaction) for interaction in recent_interactions]
+    historical_scores = [compute_interaction_score(interaction) for interaction in db[MONGO_COLLECTION_USER_INTERACTIONS].find()]
+    recent_mean = np.mean(recent_scores) if recent_scores else 0
+    historical_mean = np.mean(historical_scores) if historical_scores else 0
+    drift_score = abs(recent_mean - historical_mean) / historical_mean if historical_mean != 0 else 0
+    return drift_score
+
 def compute_user_embedding(user_id, db):
     """Compute user profile embedding as the average of liked story embeddings."""
     interactions = db[MONGO_COLLECTION_USER_INTERACTIONS].find({"user_id": user_id, "event_type": "like"})
@@ -64,6 +68,12 @@ def compute_user_embedding(user_id, db):
             embeddings.append(np.array(story["centroid"], dtype="float32"))
     return np.mean(np.stack(embeddings), axis=0) if embeddings else None
 
+def store_user_embedding(db, user_id, embedding):
+    db["user_embeddings"].update_one(
+        {"user_id": user_id},
+        {"$set": {"embedding": embedding.tolist(), "last_updated": datetime.now().isoformat()}},
+        upsert=True
+    )
 def compute_freshness_factor(last_updated, current_time, lambda_=0.1):
     """Calculate freshness using exponential decay based on time difference."""
     time_diff = (current_time - last_updated).total_seconds() / 3600  # in hours
@@ -161,12 +171,9 @@ def combine_recommendations(als_recs, faiss_recs, db, w_als=0.5, w_faiss=0.5, to
 
 # ### Main Training Function
 
-def train_and_precompute_recommendations():
+def train_and_precompute_recommendations(db):
     """Train the ALS model and precompute hybrid recommendations for all users."""
-    spark = SparkSession.builder \
-        .appName(config["spark"]["app_name"]) \
-        .master(config["spark"]["master"]) \
-        .getOrCreate()
+    spark = SparkSession.builder.appName("RecommendationTrainer").master("local[*]").getOrCreate()
 
     # Connect to MongoDB
     try:
@@ -219,9 +226,7 @@ def train_and_precompute_recommendations():
 
     # Train ALS model
     als = ALS(
-        rank=config["model"]["recommendation"]["rank"],
-        maxIter=config["model"]["recommendation"]["iterations"],
-        regParam=config["model"]["recommendation"]["reg_param"],
+        rank=5,
         userCol="userIndex",
         itemCol="storyIndex",
         ratingCol="score",
@@ -241,6 +246,7 @@ def train_and_precompute_recommendations():
     for user_id in users:
         user_embedding = compute_user_embedding(user_id, db)
         if user_embedding is not None:
+            store_user_embedding(db, user_id, user_embedding)
             als_recs = get_als_recommendations(user_id, model, user_indexer_model, item_indexer_model)
             faiss_recs = get_faiss_recommendations(user_embedding, index, mapping)
             final_recs = combine_recommendations(als_recs, faiss_recs, db)
@@ -262,16 +268,20 @@ def train_and_precompute_recommendations():
 
 def main():
     """Run the recommendation training and precomputation periodically."""
+    mongo_client = pymongo.MongoClient(MONGO_HOST, MONGO_PORT)
+    db = mongo_client[MONGO_DB]
     while True:
         start_time = time.time()
-        logger.info("Starting recommendation training and precomputation.")
-        train_and_precompute_recommendations()
+        drift_score = compute_drift_score(db)
+        logger.info(f"Current drift score: {drift_score}")
+        if drift_score > DRIFT_THRESHOLD:
+            logger.info("Drift detected. Triggering retraining.")
+            train_and_precompute_recommendations(db)
+        else:
+            logger.info("No significant drift. Skipping retraining.")
         elapsed = time.time() - start_time
-        interval = config["training"]["interval"]
-        if elapsed < interval:
-            sleep_time = interval - elapsed
-            logger.info(f"Completed in {elapsed:.2f}s. Sleeping for {sleep_time:.2f}s.")
-            time.sleep(sleep_time)
+        if elapsed < TRAINING_INTERVAL:
+            time.sleep(TRAINING_INTERVAL - elapsed)
 
 if __name__ == "__main__":
     main()
